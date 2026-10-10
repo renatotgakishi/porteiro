@@ -1,0 +1,228 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+// ============================================================
+// TENANT
+// ============================================================
+
+model Tenant {
+  id                        String   @id @default(cuid())
+  name                      String
+  slug                      String   @unique
+  starterKitUrl             String?                              // ← ADICIONA
+  connectionStringEncrypted String?
+  licenseExpiresAt          DateTime
+  dateAt                    DateTime @default(now())
+  userId                    String
+  deleted                   Boolean  @default(false)
+
+  users User[]
+  roles Role[]
+}
+
+model User {
+  id            String    @id @default(cuid())
+  tenantId      String?
+  name          String?
+  email         String
+  emailVerified DateTime?
+  image         String?
+  password      String
+  lastLoginAt   DateTime?
+  dateAt        DateTime  @default(now())
+  userId        String
+  deleted       Boolean   @default(false)
+
+  tenant        Tenant?   @relation(fields: [tenantId], references: [id])
+
+  accounts      Account[]
+  sessions      Session[]
+
+  roles         UserRole[]
+
+  @@unique([tenantId, email])
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  tenantId    String?
+  name        String
+  description String?
+  dateAt      DateTime         @default(now())
+  userId      String
+  deleted     Boolean          @default(false)
+
+  tenant      Tenant?          @relation(fields: [tenantId], references: [id])
+
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@unique([tenantId, name])
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  key         String           @unique
+  description String?
+  dateAt      DateTime         @default(now())
+  userId      String
+  deleted     Boolean          @default(false)
+
+  roles       RolePermission[]
+}
+
+// ============================================================
+// USER <-> ROLE
+// ============================================================
+
+model UserRole {
+  userId      String
+  roleId      String
+
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+
+// ============================================================
+// ROLE <-> PERMISSION
+// ============================================================
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+
+// ============================================================
+// ACCOUNT
+// ============================================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+
+  type              String
+  provider          String
+  providerAccountId String
+
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user              User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+// ============================================================
+// SESSION
+// ============================================================
+
+model Session {
+  id                  String    @id @default(cuid())
+  userId              String
+
+  // Token: guarda o HASH, nunca o valor bruto
+  refreshTokenHash    String    @unique
+
+  // Ciclo de vida
+  expiresAt           DateTime
+  createdAt           DateTime  @default(now())
+  lastUsedAt          DateTime?
+
+  // Revogação
+  revokedAt           DateTime?
+  revokedReason       String?   // 'logout' | 'rotated' | 'reuse_detected' | 'expired' | 'admin_revoked'
+
+  // Rotação (RTR) — cadeia
+  replacedBySessionId String?   @unique
+  replacedBySession   Session?  @relation("SessionRotation", fields: [replacedBySessionId], references: [id])
+  replacesSession     Session?  @relation("SessionRotation")
+
+  // Metadata de dispositivo
+  userAgent           String?
+  ipAddress           String?
+
+  // Relação com usuário
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, revokedAt])
+}
+
+
+// ============================================================
+// VERIFICATION TOKEN
+// ============================================================
+model VerificationToken {
+  id         String   @id @default(cuid())
+  identifier String                       // userId
+  token      String   @unique
+  type       String                       // 'invite' | 'reset'
+  expires    DateTime
+  dateAt     DateTime @default(now())
+
+  @@index([identifier])
+}
+
+// ============================================================
+// CATEGORY
+// ============================================================
+
+model Category {
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+
+  name        String
+
+  // Última ação realizada
+  dateAt      DateTime  @default(now())
+  userId      String
+  deleted     Boolean   @default(false)
+
+  products    Product[]
+
+  @@unique([tenantId, name])
+}
+
+
+// ============================================================
+// PRODUCT
+// ============================================================
+
+model Product {
+  id          Int       @id @default(autoincrement())
+  tenantId    String
+
+  name        String
+  description String
+  price       Decimal
+  stock       Int
+  categoryId  Int
+
+  // Última ação realizada
+  dateAt      DateTime  @default(now())
+  userId      String
+  deleted     Boolean   @default(false)
+  
+  category    Category  @relation(fields: [categoryId], references: [id])
+}
