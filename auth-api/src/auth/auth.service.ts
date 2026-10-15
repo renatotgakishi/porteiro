@@ -17,6 +17,24 @@ import { LoginDto } from './dto/login.dto';
 import { PermissionsResolverService } from './services/permissions-resolver.service';
 import { SessionsService } from './services/sessions.service';
 
+/**
+ * Formato do user que vai pro frontend.
+ * Nao expoe password nem campos internos.
+ */
+export interface SessionUser {
+  id: string;
+  name: string | null;
+  email: string;
+  tenantId: string | null;
+}
+
+export interface IssueSessionResult {
+  accessToken: string;
+  refreshToken: string;
+  user: SessionUser;
+  permissions: string[];
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -41,16 +59,11 @@ export class AuthService {
     }
 
     const existingUser = await this.prisma.user.findUnique({
-      where: {
-        tenantId_email: {
-          tenantId: dto.tenantId,
-          email: dto.email,
-        },
-      },
+      where: { email: dto.email },
     });
 
     if (existingUser && !existingUser.deleted) {
-      throw new ConflictException('Email já cadastrado neste tenant');
+      throw new ConflictException('Email já cadastrado');
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
@@ -106,7 +119,7 @@ export class AuthService {
     dto: LoginDto,
     userAgent?: string | null,
     ipAddress?: string | null,
-  ) {
+  ): Promise<IssueSessionResult> {
     // Busca global por email. A regra "email único global" é garantida
     // no UsersService (create/update). Aqui, se achar mais de um,
     // é sinal de dado inconsistente — melhor falhar do que logar no
@@ -149,6 +162,32 @@ export class AuthService {
       throw new UnauthorizedException('Email ou senha inválidos');
     }
 
+    return this.issueSession(user, userAgent, ipAddress);
+  }
+
+  /**
+   * Emite uma sessao para um user JA validado.
+   *
+   * Usado por:
+   *   - login (email + senha)
+   *   - oauth (Google)
+   *
+   * NAO valida credenciais. Quem chama e responsavel por garantir
+   * que o user pode logar (senha ok, tenant ok, license ok, etc).
+   */
+  async issueSessionForUser(
+    user: SessionUser,
+    userAgent?: string | null,
+    ipAddress?: string | null,
+  ): Promise<IssueSessionResult> {
+    return this.issueSession(user, userAgent, ipAddress);
+  }
+
+  private async issueSession(
+    user: SessionUser,
+    userAgent?: string | null,
+    ipAddress?: string | null,
+  ): Promise<IssueSessionResult> {
     const payload = {
       sub: user.id,
       tenantId: user.tenantId,
@@ -181,6 +220,7 @@ export class AuthService {
       permissions,
     };
   }
+
   async logout(userId: string, refreshToken?: string): Promise<void> {
     if (refreshToken) {
       const session =
@@ -193,6 +233,50 @@ export class AuthService {
     }
 
     await this.sessionsService.revokeAllForUser(userId, 'logout');
+  }
+
+  // auth.service.ts
+  async getMeWithTheme(userId: string) {
+    return this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        tenantId: true,
+        emailVerified: true,
+        image: true,
+        lastLoginAt: true,
+        dateAt: true,
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            starterKitUrl: true,
+            theme: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+                style: true,
+                colorsLight: true,
+                colorsDark: true,
+                backgroundLight: true,
+                backgroundDark: true,
+                glassConfig: true,
+                neumorphConfig: true,
+                shadows: true,
+                radius: true,
+                typography: true,
+                density: true,
+                status: true,
+              },
+            },
+          },
+        },
+      },
+    });
   }
 
   async validateTokenPayload(payload: {
@@ -287,6 +371,7 @@ export class AuthService {
   async getUserPermissions(userId: string): Promise<string[]> {
     return this.permissionsResolver.resolve(userId);
   }
+
   async forgotPassword(email: string): Promise<void> {
     const user = await this.prisma.user.findFirst({
       where: { email, deleted: false },
@@ -339,7 +424,12 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: final.userId },
-      data: { password: passwordHash },
+      data: {
+        password: passwordHash,
+        // O user provou que controla o email (clicou no link e
+        // consumiu o token). Marca o email como verificado.
+        emailVerified: new Date(),
+      },
     });
 
     await this.verificationTokens.consume(token);

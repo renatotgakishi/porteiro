@@ -9,6 +9,17 @@ import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
 
 import { AuthService } from '../auth.service';
+import {
+  detectClientPrefix,
+  accessCookieName,
+  type ClientPrefix,
+} from '../cookie-prefix';
+
+// Prefixos que o guard procura, em ordem de prioridade.
+// 'admin_' e 'starter_' primeiro (novo formato).
+// '' (vazio) por ultimo, pra compatibilidade com cookies antigos
+// durante a transicao.
+const PREFIXES_TO_TRY: ClientPrefix[] = ['admin_', 'starter_', ''];
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -43,17 +54,31 @@ export class JwtAuthGuard implements CanActivate {
   }
 
   /**
-   * Extrai o access token de duas fontes, nessa ordem:
-   *   1. Cookie httpOnly `access_token` (frontend)
-   *   2. Header `Authorization: Bearer <token>` (testes manuais, curl, Swagger)
+   * Extrai o access token das seguintes fontes, nessa ordem:
+   *   1. Cookie do prefixo do cliente detectado (ex: 'admin_access_token')
+   *   2. Cookie de qualquer outro prefixo conhecido (fallback)
+   *   3. Cookie 'access_token' sem prefixo (compatibilidade)
+   *   4. Header 'Authorization: Bearer <token>' (curl, Swagger)
    */
   private extractToken(request: Request): string | null {
-    const cookieToken = request.cookies?.access_token;
+    const detected = detectClientPrefix(request);
 
-    if (typeof cookieToken === 'string' && cookieToken.length > 0) {
-      return cookieToken;
+    // Monta a lista: prefixo detectado primeiro, depois os outros.
+    const order: ClientPrefix[] = [
+      detected,
+      ...PREFIXES_TO_TRY.filter((p) => p !== detected),
+    ];
+
+    // Tenta cada prefixo. O primeiro cookie nao-vazio ganha.
+    for (const prefix of order) {
+      const cookieToken = request.cookies?.[accessCookieName(prefix)];
+
+      if (typeof cookieToken === 'string' && cookieToken.length > 0) {
+        return cookieToken;
+      }
     }
 
+    // Fallback: header Authorization Bearer.
     const authorization = request.headers.authorization;
 
     if (!authorization) {

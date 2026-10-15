@@ -19,7 +19,7 @@ export class VerificationTokenService {
       this.config.get<string>('VERIFICATION_TOKEN_TTL_HOURS') ?? 24,
     );
     this.fallbackStarterKitUrl =
-      this.config.get<string>('STARTER_IT_URL') ?? 'http://localhost:4001';
+      this.config.get<string>('STARTER_KIT_URL') ?? 'http://localhost:4001';
   }
 
   /**
@@ -121,10 +121,7 @@ export class VerificationTokenService {
    * Monta a URL do starter-kit pra enviar no email.
    * Usa o starterKitUrl do tenant, ou o fallback do .env.
    */
-  async buildSetPasswordUrl(
-    userId: string,
-    rawToken: string,
-  ): Promise<string> {
+  async buildSetPasswordUrl(userId: string, rawToken: string): Promise<string> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -134,8 +131,7 @@ export class VerificationTokenService {
       },
     });
 
-    const baseUrl =
-      user?.tenant?.starterKitUrl ?? this.fallbackStarterKitUrl;
+    const baseUrl = user?.tenant?.starterKitUrl ?? this.fallbackStarterKitUrl;
 
     //return `${baseUrl}/auth/set-password?token=${rawToken}`;
     return `${baseUrl}/set-password?token=${rawToken}`;

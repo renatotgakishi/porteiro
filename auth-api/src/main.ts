@@ -9,21 +9,31 @@ import { Logger } from 'nestjs-pino';
 import cookieParser from 'cookie-parser';
 
 import { AppModule } from './app.module';
-//import { ApiResponseMiddleware } from './middleware/api-response.middleware';
+
+/**
+ * Le CORS_ORIGINS do .env (lista separada por virgula).
+ * Fallback: origens de dev (admin-panel :3001 e starter-web :4001).
+ */
+function getCorsOrigins(): string[] {
+  const raw =
+    process.env.CORS_ORIGINS ??
+    'http://localhost:3001,http://localhost:4001';
+
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
-
-  /*const apiResponseMiddleware = new ApiResponseMiddleware();
-
-  app.use(apiResponseMiddleware.use.bind(apiResponseMiddleware));*/
 
   app.useLogger(app.get(Logger));
 
   app.use(cookieParser());
 
   app.enableCors({
-    origin: ['http://localhost:3001', 'http://localhost:4001'],
+    origin: getCorsOrigins(),
     credentials: true,
   });
 

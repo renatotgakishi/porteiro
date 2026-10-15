@@ -19,6 +19,9 @@ import { UserRolesModule } from './user-roles/user-roles.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { MailModule } from './mail/mail.module';
 import { ThrottlerRedisStorage } from './common/throttler/throttler-redis-storage';
+import { ThemesModule } from './themes/themes.module';
+import { OAuthModule } from './auth/oauth/oauth.module';
+
 
 @Module({
   imports: [
@@ -53,6 +56,8 @@ import { ThrottlerRedisStorage } from './common/throttler/throttler-redis-storag
     UserRolesModule,
     SessionsModule,
     MailModule,
+    ThemesModule,
+    OAuthModule,
   ],
   controllers: [AppController],
   providers: [

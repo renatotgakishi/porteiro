@@ -16,12 +16,15 @@ model Tenant {
   id                        String   @id @default(cuid())
   name                      String
   slug                      String   @unique
-  starterKitUrl             String?                              // ← ADICIONA
+  starterKitUrl             String?
   connectionStringEncrypted String?
   licenseExpiresAt          DateTime
   dateAt                    DateTime @default(now())
   userId                    String
   deleted                   Boolean  @default(false)
+  
+  themeId String?
+  theme Theme? @relation(fields: [themeId], references: [id])
 
   users User[]
   roles Role[]
@@ -47,7 +50,7 @@ model User {
 
   roles         UserRole[]
 
-  @@unique([tenantId, email])
+  @@unique([email])
 }
 
 model Role {
@@ -109,28 +112,25 @@ model RolePermission {
 
 
 // ============================================================
-// ACCOUNT
+// ACCOUNT (OAuth)
+// ============================================================
+// Vincula um provider externo (Google) a um User existente.
+// Fluxo: OAuth so loga user que JA existe (criado via admin + convite).
+// Nao cria user novo. Se nao achar pelo email, rejeita.
 // ============================================================
 
 model Account {
-  id                String  @id @default(cuid())
+  id                String   @id @default(cuid())
   userId            String
+  provider          String   // 'google'
+  providerAccountId String   // 'sub' do Google (id estavel da conta Google)
+  dateAt            DateTime @default(now())
+  deleted           Boolean  @default(false)
 
-  type              String
-  provider          String
-  providerAccountId String
-
-  refresh_token     String?
-  access_token      String?
-  expires_at        Int?
-  token_type        String?
-  scope             String?
-  id_token          String?
-  session_state     String?
-
-  user              User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 // ============================================================
@@ -182,6 +182,29 @@ model VerificationToken {
   dateAt     DateTime @default(now())
 
   @@index([identifier])
+}
+
+model Theme {
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  style           String   @default("flat") // flat | glass | neumorphism
+  colorsLight     Json
+  colorsDark      Json
+  backgroundLight Json
+  backgroundDark  Json
+  glassConfig     Json?    // { opacityLight, opacityDark, blur, saturate }
+  neumorphConfig  Json?    // { intensity, inset }
+  shadows         Json?    // { card, float }
+  radius          Json?    // { card, button, input }
+  typography      Json?    // { fontFamily }
+  density         String   @default("comfortable")
+  status          String   @default("draft")
+  dateAt          DateTime @default(now())
+  userId          String
+  deleted         Boolean  @default(false)
+
+  tenants         Tenant[]
 }
 
 // ============================================================

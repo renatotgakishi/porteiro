@@ -12,6 +12,10 @@ Para cada um, existe um arquivo complementar:
 Este arquivo (COMUM) deve ser colado SEMPRE. Junto com ele, cole o
 arquivo especifico do projeto que voce quer trabalhar.
 
+Existe tambem um DESIGN-SYSTEM.md que descreve o padrao visual do
+frontend (cores, componentes, espacamento). Cole junto quando for
+mexer em UI.
+
 =========================================================================
 REGRA DE OURO: NAO REDESENHAR ARQUITETURA
 =========================================================================
@@ -34,6 +38,8 @@ Forma de trabalho obrigatoria:
   4. Backend e frontend em lotes separados. Backend primeiro, testar
      por curl, depois frontend.
   5. Se o dev pedir script de teste, entregar como arquivo .sh.
+  6. Se o markdown do chat quebrar (problema recorrente), mandar
+     conteudo em TEXTO PURO pro dev colar no VS Code.
 
 Nao concordar por concordar. Se algo estiver errado, dizer.
 O dev prefere ser corrigido.
@@ -51,8 +57,9 @@ Ele NAO TEM IAM proprio. Toda autenticacao e permissao vem do Porteiro.
 Os dois projetos compartilham:
   - A MESMA arquitetura de pastas (NestJS backend + Next.js frontend)
   - O MESMO JWT_SECRET (o Porteiro assina, os clientes validam)
-  - O MESMO Redis (cache de permissions - ver secoes especificas)
+  - O MESMO Redis (cache de permissions)
   - Os MESMOS padroes de codigo (ver abaixo)
+  - O MESMO design system (ver DESIGN-SYSTEM.md)
 
 =========================================================================
 STACK
@@ -71,6 +78,8 @@ Backend (NestJS 12):
   - prom-client + Prometheus
   - Redis (ioredis)
   - cookie-parser
+  - nodemailer (envio de email)
+  - @nestjs/throttler (rate limiting)
 
 Frontend (Next.js 16):
   - App Router + Turbopack
@@ -164,6 +173,90 @@ Regra ESPECIAL (IAM - users, roles, permissions, user-roles, tenants):
       : (input.tenantId ?? null);
 
 =========================================================================
+VERIFICATION TOKEN (convite + reset de senha)
+=========================================================================
+
+Modelo VerificationToken:
+  - id         (cuid)
+  - identifier (userId)
+  - token      (SHA-256 do token cru, unico)
+  - type       ('invite' | 'reset')
+  - expires    (data de expiracao)
+  - dateAt     (criacao)
+
+Fluxo:
+  1. Admin cria user com senha temporaria (123456)
+  2. Admin clica em "Convidar" no admin-panel
+  3. Backend gera token (raw = 32 bytes hex), grava hash
+  4. Backend monta URL: {tenant.starterKitUrl}/set-password?token=xxx
+     Se tenant.starterKitUrl nao existir, usa STARTER_KIT_URL do .env
+  5. Envia email (driver console em dev, SMTP em prod)
+  6. User clica no link -> tela /set-password
+  7. User define nova senha -> POST /auth/set-password
+  8. Backend valida token, atualiza senha, consome token,
+     revoga TODAS as sessoes do user
+  9. User loga com a nova senha
+
+Mesmo mecanismo serve pra reset de senha (esqueci):
+  - type = 'reset' em vez de 'invite'
+  - Endpoint POST /auth/forgot-password gera o token
+
+Expiração: VERIFICATION_TOKEN_TTL_HOURS no .env (padrao 24h).
+Tokens sao de USO UNICO (consumidos apos validacao).
+Um novo token do mesmo user + tipo invalida os anteriores.
+
+=========================================================================
+MAIL
+=========================================================================
+
+MailService com 2 drivers:
+  - console (dev): imprime no stdout do backend E grava em logs/mail.log
+  - smtp (prod): usa nodemailer, configurado via .env
+
+Config no .env:
+  MAIL_DRIVER=console | smtp
+  MAIL_FROM="Porteiro <no-reply@porteiro.local>"
+  SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_SECURE
+
+O arquivo logs/mail.log e essencial em dev: o tmux quebra linhas
+longas (ex: URL com token de 64 chars), e o arquivo nao quebra.
+Sempre ler o link do arquivo: tail -30 logs/mail.log
+
+=========================================================================
+RATE LIMITING (auth)
+=========================================================================
+
+@nestjs/throttler com storage Redis customizado
+(src/common/throttler/throttler-redis.storage.ts).
+
+IMPORTANTE: o ThrottlerGuard global (APP_GUARD) foi REMOVIDO.
+Motivo: rodava em paralelo com os guards customizados e gerava
+2 chaves no Redis (uma por IP, outra por tracker customizado),
+causando bloqueios incorretos.
+
+Cada endpoint declara seu proprio @UseGuards(ThrottlerGuard) ou
+um dos guards customizados.
+
+Guards customizados:
+  - LoginThrottlerGuard   -> chave = IP + email
+  - EmailThrottlerGuard   -> chave = email (fallback IP)
+  - UserThrottlerGuard    -> chave = user.id (fallback IP)
+
+Limites atuais (auth.controller.ts):
+  POST /auth/login            -> 5 / 1 min   (IP + email)
+  POST /auth/register         -> 3 / 1 hora  (IP)
+  POST /auth/refresh          -> 30 / 1 min  (IP)
+  POST /auth/forgot-password  -> 5 / 15 min  (email)
+  POST /auth/set-password     -> 10 / 15 min (IP)
+  POST /auth/change-password  -> 5 / 15 min  (user)
+
+DEBITO: os outros controllers (products, categories, users, tenants,
+roles, permissions, user-roles, sessions) NAO tem rate limit ainda.
+Aplicar manualmente com @UseGuards(ThrottlerGuard) ou
+@UseGuards(UserThrottlerGuard) no topo do controller.
+Sugestao de limites por controller esta no CONTEXTO-PORTEIRO.md.
+
+=========================================================================
 O QUE NAO FAZER (vale para os dois projetos)
 =========================================================================
 
@@ -175,6 +268,7 @@ O QUE NAO FAZER (vale para os dois projetos)
   - Nao mexer em Pino / Loki / Prometheus / Grafana sem pedido explicito
   - Nao reorganizar diretorios sem decisao explicita
   - Nao usar confirm() nativo (usar o <ConfirmDialog> do projeto)
+  - Nao usar classes Tailwind hardcoded (usar as do tema, ver DESIGN-SYSTEM.md)
 
 =========================================================================
 DIVISAO DOS ARQUIVOS DE CONTEXTO
@@ -185,13 +279,7 @@ Leia este arquivo (COMUM) SEMPRE.
 Depois leia o especifico:
   - CONTEXTO-PORTEIRO.md      -> auth server
   - CONTEXTO-STARTER-KIT.md   -> produto-cliente
-
-Cada especifico tem:
-  - Estrutura de pastas
-  - Portas e endpoints
-  - O que ele faz de diferente
-  - Debitos tecnicos proprios
-  - Proximas tarefas
+  - DESIGN-SYSTEM.md          -> padrao visual (opcional, so se for UI)
 
 =========================================================================
 COMO UMA IA DEVE TRABALHAR NESTE PROJETO

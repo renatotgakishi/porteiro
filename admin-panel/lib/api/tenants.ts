@@ -1,27 +1,29 @@
-import { api } from "../api";
+import { api } from "../api"
 
 export type Tenant = {
-  id: string;
-  name: string;
-  slug: string;
-  licenseExpiresAt: string;
-  connectionStringEncrypted: string | null;
-  dateAt: string;
-  userId: string;
-  deleted: boolean;
-};
+  id: string
+  name: string
+  slug: string
+  licenseExpiresAt: string
+  themeId?: string | null
+  theme?: { id: string; name: string } | null
+  connectionStringEncrypted: string | null
+  dateAt: string
+  userId: string
+  deleted: boolean
+}
 
 export type CreateTenantInput = {
-  name: string;
-  licenseExpiresAt: string;
-  connectionStringEncrypted?: string;
-};
+  name: string
+  licenseExpiresAt: string
+  connectionStringEncrypted?: string
+}
 
 export type UpdateTenantInput = {
-  name?: string;
-  licenseExpiresAt?: string;
-  connectionStringEncrypted?: string;
-};
+  name?: string
+  licenseExpiresAt?: string
+  connectionStringEncrypted?: string
+}
 
 export const TenantsAPI = {
   list: () => api<Tenant[]>("/tenants"),
@@ -44,4 +46,11 @@ export const TenantsAPI = {
     api<Tenant>(`/tenants/${id}`, {
       method: "DELETE",
     }),
-};
+
+  updateTheme: (id: string, themeId: string | null) =>
+    api(`/tenants/${id}/theme`, {
+      method: "PATCH",
+      //body: JSON.stringify({ themeId }),
+      body: { themeId } 
+    }),
+}

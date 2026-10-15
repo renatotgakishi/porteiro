@@ -24,12 +24,11 @@ export function TopBar() {
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
 
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
-  const currentTenant = availableTenants.find(
-    (t) => t.id === selectedTenantId,
-  );
-
+  const currentTenant = availableTenants.find((t) => t.id === selectedTenantId);
   const segments = pathname.split("/").filter(Boolean);
   const crumbs = segments.slice(1);
 
@@ -37,7 +36,7 @@ export function TopBar() {
     <div className="h-14 border-b border-border bg-card flex items-center justify-between px-4 shrink-0">
       <div className="flex items-center gap-2 text-sm">
         <span className="text-muted-foreground font-medium">
-          {currentTenant?.name ?? "Plataforma"}
+          {currentTenant?.name?? "Plataforma"}
         </span>
 
         {crumbs.map((seg, i) => {
@@ -46,15 +45,13 @@ export function TopBar() {
           return (
             <span key={seg} className="flex items-center gap-2">
               <span className="text-muted-foreground">›</span>
-              {isLast ? (
+              {isLast? (
                 <span className="bg-primary text-primary-foreground px-3 py-1 rounded-full text-xs font-medium">
                   {label}
                 </span>
               ) : (
                 <span className="text-foreground">
-                  {label === "Cargos & Permissões"
-                    ? "Gestão de Acesso"
-                    : label}
+                  {label === "Cargos & Permissões"? "Gestão de Acesso" : label}
                 </span>
               )}
             </span>
@@ -81,12 +78,14 @@ export function TopBar() {
         </div>
 
         <button
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          onClick={() => setTheme(theme === "dark"? "light" : "dark")}
           className="w-9 h-9 rounded-full border border-border flex items-center justify-center hover:bg-muted bg-card transition"
+          title="Alternar tema claro/escuro"
+          aria-label="Alternar tema claro/escuro"
         >
-          {!mounted ? (
+          {!mounted? (
             <div className="w-4 h-4" />
-          ) : theme === "dark" ? (
+          ) : theme === "dark"? (
             <Sun size={16} />
           ) : (
             <Moon size={16} />
