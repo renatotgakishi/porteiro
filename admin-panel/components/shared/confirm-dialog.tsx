@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
+import { Card } from "@/components/ui/card";
 
 export type ConfirmVariant = "default" | "danger";
 
@@ -30,14 +31,12 @@ export function ConfirmDialog({
 }: Props) {
   const cancelRef = useRef<HTMLButtonElement>(null);
 
-  // Foco no Cancelar ao abrir (evita delete acidental com Enter)
   useEffect(() => {
     if (open) {
       setTimeout(() => cancelRef.current?.focus(), 0);
     }
   }, [open]);
 
-  // Fecha no ESC
   useEffect(() => {
     if (!open) return;
     function handleKey(e: KeyboardEvent) {
@@ -62,8 +61,8 @@ export function ConfirmDialog({
       className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-[60]"
       onClick={onCancel}
     >
-      <div
-        className="bg-card rounded-2xl p-6 w-full max-w-sm border border-border shadow-xl"
+      <Card
+        className="p-6 w-full max-w-sm shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3">
@@ -103,7 +102,7 @@ export function ConfirmDialog({
             {loading ? "..." : confirmLabel}
           </button>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

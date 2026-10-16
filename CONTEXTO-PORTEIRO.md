@@ -12,10 +12,12 @@ E a AUTORIDADE FINAL de seguranca do ecossistema.
 
 Ele faz:
   - Autenticacao (login, refresh, logout)
+  - OAuth (Google)
   - Autorizacao (RBAC via permissions)
   - Multi-tenancy (tenants, isolamento)
   - Sessoes (RTR com deteccao de reuso)
   - CRUD de users, roles, permissions, tenants
+  - CRUD de themes (catalogo + vinculo a tenant)
   - Convite + reset de senha (VerificationToken + Mail)
   - Rate limiting em endpoints de auth
 
@@ -36,6 +38,7 @@ ESTRUTURA DE PASTAS
   CONTEXTO-PORTEIRO.md (este arquivo)
   CONTEXTO-STARTER-KIT.md (copia)
   DESIGN-SYSTEM.md    (copia)
+  SISTEMA-DE-TEMAS.md (copia)
   start-all.sh        sobe so o Porteiro
   stop-all.sh         derruba so o Porteiro
 
@@ -49,7 +52,7 @@ auth-api:      3000
 admin-panel:   3001
 observability: 3002 (Grafana), 9090 (Prometheus), 3100 (Loki)
 Postgres:      5432
-Redis:         6379
+Redis:         6379 (COM SENHA)
 RedisInsight:  5540
 
 =========================================================================
@@ -60,10 +63,16 @@ src/
   auth/              Autenticacao
     auth.controller.ts
     auth.service.ts
-    decorators/      @RequirePermissions, @CurrentUser
-    dto/             login, register, forgot-password, set-password,
-                     change-password
-    guards/          JwtAuthGuard, PermissionGuard
+    cookie-prefix.ts                 (deteccao de prefixo por Origin)
+    decorators/                      @RequirePermissions, @CurrentUser
+    dto/                             login, register, forgot-password,
+                                     set-password, change-password
+    guards/                          JwtAuthGuard, PermissionGuard
+    oauth/                           OAuth Google
+      oauth.controller.ts
+      oauth.service.ts
+      google.client.ts
+      oauth.module.ts
     services/
       permissions-resolver.service.ts    (Redis + Postgres)
       permissions-cache.service.ts       (invalidacao)
@@ -73,13 +82,14 @@ src/
   roles/             CRUD de papeis
   permissions/       Catalogo de permissions (SO LEITURA)
   user-roles/        Associacao user <-> role
-  tenants/           CRUD de tenants
+  tenants/           CRUD de tenants + GET/PATCH /tenants/:id/theme
   sessions/          Listagem/revogacao de sessoes (admin)
+  themes/            CRUD de temas (catalogo + vinculo a tenant)
   products/          Entidade de exemplo (referencia de padrao)
   categories/        Entidade de exemplo (referencia de padrao)
   mail/              MailModule + MailService (@Global)
   common/throttler/  Guards + storage customizado de rate limit
-  redis/             Modulo global do Redis
+  redis/             Modulo global do Redis (COM SENHA)
   prisma/            Modulo global do Prisma
   logger/            Configuracao do Pino
   generated/prisma/  Prisma Client (gerado, nao versionar)
@@ -89,19 +99,23 @@ ESTRUTURA DO FRONTEND (admin-panel/)
 =========================================================================
 
 app/
-  layout.tsx         Providers globais
+  layout.tsx         Providers globais (ThemeProvider + TenantThemeProvider
+                     + PermissionsProvider + ConfirmProvider)
   (auth)/login/      Tela de login
   (dashboard)/
     layout.tsx       Guard + bootstrap + sidebar
     dashboard/
       page.tsx
-      tenants/       Gestao de tenants (cartao)
+      tenants/       Gestao de tenants (cartao) + atribuicao de tema
       roles/         Gestao de papeis
       users/         Gestao de usuarios
+      themes/        CRUD de temas (catalogo)
       products/      CRUD exemplo
       categories/    CRUD exemplo
 
 components/
+  theme/
+    TenantThemeProvider.tsx   aplica o tema do tenant ativo
   layout/            Sidebar, TopBar, TenantSwitcher
   shared/            Combobox, ConfirmDialog, CanButton, CrudModal
   users/             Componentes de usuarios
@@ -113,11 +127,12 @@ components/
 hooks/               use-users, use-roles, use-user-sessions, ...
 lib/
   api.ts             Cliente HTTP (interceptor 401/refresh)
-  api/               Servicos por dominio
+  api/               Servicos por dominio (users, roles, tenants, themes)
   permission-context.tsx
   confirm-context.tsx
 stores/
   useAuthStore.ts    Zustand global
+  useThemeStore.ts   Zustand (temas do catalogo + activeThemeId)
 
 =========================================================================
 MODELO CONCEITUAL
@@ -132,7 +147,7 @@ O User recebe Roles via UserRole.
 NUNCA se decide autorizacao pelo NOME da role. Sempre pela permission.
 
 =========================================================================
-LISTA DE PERMISSIONS (21 no seed)
+LISTA DE PERMISSIONS (seed)
 =========================================================================
 
 iam.users.read | create | update | delete
@@ -141,6 +156,11 @@ iam.permissions.read
 platform.tenants.read | create | update | delete
 catalog.categories.read | create | update | delete
 catalog.products.read | create | update | delete
+observabilidade.visaogeral.read
+
+Obs: themes usam as permissions platform.tenants.* (nao tem dominio
+proprio). Decisao pra nao criar mais dominios. Se virar necessidade,
+criar platform.themes.*.
 
 =========================================================================
 ENDPOINTS PRINCIPAIS
@@ -148,14 +168,18 @@ ENDPOINTS PRINCIPAIS
 
 Auth:
   POST /auth/register
-  POST /auth/login
-  POST /auth/refresh        (RTR)
+  POST /auth/login                 (retorna { user, permissions, accessToken })
+  POST /auth/refresh               (RTR)
   POST /auth/logout
-  GET  /auth/me
+  GET  /auth/me                    (retorna theme junto com o user)
   GET  /auth/me/permissions
   POST /auth/forgot-password
-  POST /auth/set-password
+  POST /auth/set-password          (marca emailVerified)
   POST /auth/change-password
+
+OAuth Google:
+  GET  /auth/oauth/google           (redireciona pro Google)
+  GET  /auth/oauth/google/callback  (recebe callback, seta cookies)
 
 IAM:
   GET|POST|PATCH|DELETE /users
@@ -165,6 +189,11 @@ IAM:
   GET /permissions          (somente leitura)
   GET|POST|DELETE /user-roles
   GET|POST|PATCH|DELETE /tenants
+  GET /tenants/:id/theme            (retorna tema do tenant)
+  PATCH /tenants/:id/theme          (seta tema)
+
+Themes:
+  GET|POST|PATCH|DELETE /themes     (catalogo global)
 
 Sessoes (por user, admin):
   GET /users/:userId/sessions
@@ -187,41 +216,98 @@ O login busca o user por email GLOBALMENTE (sem filtrar por tenant).
 
   if (candidates.length === 0) 401
   if (candidates.length > 1) 500 (ambiguidade - nunca deveria ocorrer)
-  if (candidates.length === 1) -> valida senha -> emite JWT
+  if (candidates.length === 1) -> valida senha -> issueSession
 
-Regra de negocio: email e unico GLOBALMENTE (nao so por tenant).
-Isso e garantido no UsersService (assertEmailGloballyUnique).
+Regra: email e unico GLOBALMENTE (nao so por tenant).
+Garantido no banco (User.@@unique([email])) e no UsersService.
+Se achar mais de um, e sinal de dado inconsistente (insercao manual
+ou seed). Melhor falhar que logar no tenant errado.
 
 =========================================================================
-FLUXO DE CONVITE (VerificationToken)
+ISSUESESSION - PONTO UNICO DE EMISSAO
 =========================================================================
 
-1. Admin cria user no admin-panel com senha temporaria (123456)
-2. Admin clica em "Convidar" no user-list-item
-3. POST /users/:id/invite gera token 'invite' + envia email
-4. Email tem link: {tenant.starterKitUrl}/set-password?token=xxx
-   (fallback: STARTER_KIT_URL do .env)
-5. User clica, define senha em POST /auth/set-password
-6. Backend valida token, atualiza senha, consome token,
-   revoga TODAS as sessoes do user
+AuthService tem um metodo PRIVADO issueSession(user, userAgent, ipAddress)
+que faz o trabalho de emitir sessao:
+  - Assina JWT
+  - Cria Session (SessionsService.createSession)
+  - Atualiza User.lastLoginAt
+  - Resolve permissions
+  - Retorna { accessToken, refreshToken, user, permissions }
 
-Reset de senha (esqueci):
-  - Mesmo mecanismo, type='reset'
-  - POST /auth/forgot-password gera token
-  - Email com mesmo link /set-password?token=xxx
+Usado por:
+  - login (email + senha)
+  - OAuth (via issueSessionForUser publico)
+
+Qualquer coisa que precise emitir sessao DEVE usar esse metodo.
+NAO duplicar a logica.
+
+=========================================================================
+GET /AUTH/ME - RETORNA TEMA
+=========================================================================
+
+O /auth/me chama AuthService.getMeWithTheme(userId):
+  - Busca o user com SELECT explicito (NAO use findUnique sem select,
+    senao vaza password).
+  - Inclui tenant + tenant.theme.
+
+Retorno:
+  {
+    id, name, email, tenantId, emailVerified, image, lastLoginAt,
+    dateAt,
+    tenant: {
+      id, name, slug, starterKitUrl,
+      theme: { ...todos os campos do tema... }
+    }
+  }
+
+NAO retorna password. NUNCA.
+NAO retorna userId (campo de auditoria interno).
+
+=========================================================================
+OAUTH - DETALHES
+=========================================================================
+
+Modulo: src/auth/oauth/
+  oauth.controller.ts   endpoints /auth/oauth/google[/callback]
+  oauth.service.ts      startGoogleFlow() + handleGoogleCallback()
+  google.client.ts      wrapper da google-auth-library
+  oauth.module.ts       importa AuthModule (pra reusar issueSessionForUser)
+
+Cookie de state (CSRF): oauth_state, httpOnly, 5 min.
+Validado no callback. Sem isso, qualquer um poderia forjar login.
+
+Callback NUNCA devolve JSON. Sempre redirect HTTP (302).
+Motivo: quem navega e o browser, nao o JS.
+
+Falha: redireciona pra OAUTH_FAILURE_REDIRECT?error=<motivo>.
+Motivos comuns:
+  access_denied           -> user cancelou no Google
+  invalid_state           -> cookie oauth_state nao bate
+  missing_code_or_state   -> Google nao mandou code ou state
+  Email do Google nao esta verificado
+  Voce precisa ser convidado antes de entrar com Google
+  Esta conta Google ja esta vinculada a outro usuario
+  Falha na autenticacao com o Google
+
+COOKIE PREFIX no OAuth:
+  O callback nao tem Origin (navegacao top-level). Hardcodamos
+  OAUTH_CLIENT_PREFIX = 'starter_' no oauth.controller.
+  Se um dia houver OAuth no admin-panel, passar ?client=admin
+  na URL de /auth/oauth/google.
 
 =========================================================================
 COMO O PORTEIRO E CONSUMIDO POR CLIENTES
 =========================================================================
 
 1. Cliente faz POST /auth/login no Porteiro
-2. Porteiro valida, emite JWT + refresh (cookies httpOnly)
+2. Porteiro valida, emite JWT + refresh (cookies com prefixo do cliente)
 3. Porteiro resolve permissions e grava em Redis (perms:user:{id})
 4. Porteiro devolve { user, permissions } pro cliente
 5. Cliente guarda no Zustand (memoria)
 
 Nas requisicoes seguintes:
-  - Cliente envia o cookie em todas as chamadas
+  - Cliente envia o cookie em todas as chamadas (credentials: 'include')
   - Se for pro proprio Porteiro: JwtAuthGuard valida + PermissionGuard
   - Se for pra um cliente (starter-kit): o cliente valida o JWT
     (mesmo JWT_SECRET) e consulta permissions no Redis do Porteiro
@@ -247,12 +333,20 @@ Deteccao de anomalia na UI de sessoes:
 
 GeoIP resolvido on-read com geoip-lite (nao persistido).
 
+TTL do refresh: 7 dias (fixo). NAO vinculado a licenseExpiresAt por
+enquanto (decisao: com planos trimestral/semestral/anual, 7 dias de
+grace e irrelevante).
+
+PENDENCIA: lastUsedAt na Session nunca e atualizado no rotate().
+Falta 1 linha.
+
 =========================================================================
 RATE LIMITING - DETALHES
 =========================================================================
 
 Storage customizado em src/common/throttler/throttler-redis.storage.ts
-Implementa ThrottlerStorage usando o RedisService existente.
+Implementa ThrottlerStorage usando o RedisService existente
+(que ja tem a senha do Redis).
 Chave: throttle:{throttlerName}:{tracker}
 
 O ThrottlerGuard GLOBAL foi removido (APP_GUARD). Cada endpoint
@@ -271,28 +365,9 @@ Limites atuais no auth.controller.ts:
   POST /auth/set-password     -> 10 / 15 min (IP)
   POST /auth/change-password  -> 5 / 15 min  (user)
 
-Como aplicar em outros controllers:
-  1. Importar UserThrottlerGuard (ou ThrottlerGuard padrao)
-  2. @UseGuards(JwtAuthGuard, UserThrottlerGuard) no topo do controller
-  3. @Throttle({ default: { limit: X, ttl: Y } }) onde quiser
-     limite diferente do global
-
-Sugestao de limites por controller:
-  products     -> global (100/min) + POST 30/min
-  categories   -> global (100/min) + POST 30/min
-  users        -> global + POST 10/min + POST /:id/invite 5/min
-  tenants      -> global + POST 10/min
-  roles        -> global
-  permissions  -> global
-  user-roles   -> global
-  sessions     -> global
-
-Conceitos importantes:
-  - limit = numero de requisicoes
-  - ttl = janela em milissegundos (60_000 = 1 min, 900_000 = 15 min)
-  - A 11a request (limit=10) e bloqueada com 429
-  - O contador e por tracker (IP, user, email) - nao global
-  - Cada tracker tem seu proprio balde
+Como limpar o rate limit em dev (se travar):
+  docker exec -it porteiro-redis redis-cli -a <senha> --scan --pattern "throttle:*"
+  docker exec -it porteiro-redis redis-cli -a <senha> FLUSHALL
 
 =========================================================================
 SCRIPTS
@@ -304,8 +379,10 @@ SCRIPTS
 O start-all.sh do starter-kit sobe o Porteiro TAMBEM (para o cliente
 funcionar). Mas se voce quer subir SO o Porteiro, usa o daqui.
 
-Ambos os scripts tem verificacao: se algum servico nao subir,
-o script ABORTA com exit 1 e diz qual falhou.
+PENDENCIA: o start-all.sh do starter-kit tem polling fraco. As vezes
+nao sobe tudo (starter-api fica de fora, observability nunca sobe).
+O script aborta com exit 1 se algum falhar, mas a verificacao pode
+ser melhorada.
 
 =========================================================================
 LOG DE EMAILS EM DEV
@@ -326,23 +403,25 @@ DEBITOS TECNICOS DO PORTEIRO
 
 1. Rate limit nos outros controllers
    Auth esta protegido. Products, categories, users, tenants, roles,
-   permissions, user-roles, sessions NAO tem rate limit.
-   Solucao: aplicar @UseGuards(ThrottlerGuard) no topo de cada
-   controller (ver secao RATE LIMITING).
+   permissions, user-roles, sessions, themes NAO tem rate limit.
 
 2. Multi-aba com RTR
    Abas concorrentes podem causar queda pra login (reuse detectado).
    Solucao futura: BroadcastChannel coordenando refresh entre abas.
+   So ocorre em multi-aba do MESMO app (nao confundir com "cookies
+   com prefixo" - aquilo resolveu admin-panel vs starter-web).
 
-3. Tenant sem campos extras
+3. Status HTTP nos outros controllers
+   Auth corrigido (@HttpCode(200) nos endpoints que nao criam recurso).
+   Os outros controllers ainda usam 201 indiscriminado em @Post.
+
+4. Tenant sem campos extras
    (color, plan, domain, status, timezone)
    Derivar status de licenseExpiresAt.
 
-4. TTL do refresh vinculado a tenant.licenseExpiresAt
-   Hoje fixo em 7 dias.
-
-5. Redis sem senha
-   Em producao, adicionar --requirepass e REDIS_PASSWORD.
+5. TTL do refresh vinculado a tenant.licenseExpiresAt
+   Hoje fixo em 7 dias. Decisao: NAO fazer (planos trimestral/anual).
+   Revisitar se virar cobranca por uso.
 
 6. lastUsedAt na Session nunca atualizado
    Deveria ser atualizado em /auth/refresh. Falta 1 linha no rotate().
@@ -358,18 +437,17 @@ DEBITOS TECNICOS DO PORTEIRO
    Revisar antes de producao.
 
 10. 2FA, politica de senha, auditoria de login
-    Nao existem.
+    Nao existem. Ver CONTEXTO-COMUM secao "2FA / STEP-UP (PLANEJADO)".
 
 11. Testes automatizados
     Zero. Comecar pelo fluxo de auth (Jest + Supertest).
 
 12. OAuth (Google/GitHub)
-    Tabela Account existe no schema (resquicio do NextAuth) mas
-    nao e usada. Feature futura.
+    Google implementado (Cenario B). GitHub nao.
 
 13. Menu de configuracoes
     Onde vao morar: retencao de sessoes, timezone, rate limit
-    configuravel, etc.
+    configuravel, politica de senha, etc.
 
 14. Cleanup de sessoes
     Job para apagar sessoes revogadas antigas. Adiado.
@@ -378,21 +456,56 @@ DEBITOS TECNICOS DO PORTEIRO
     As vezes o tmux nao sobe tudo. O script ja foi ajustado pra
     abortar se falhar, mas a logica de verificacao pode ser melhorada.
 
+16. Observability nao sobe
+    Loki/Grafana/Prometheus. Erros de ECONNREFUSED no log do Porteiro.
+
+17. start-all.sh - observability
+    O --with-observability nao esta funcionando consistentemente.
+
+18. ThemesService.remove nao usa transacao
+    Se falhar entre updateMany (tenants) e update (tema), tenants
+    ficam orfaos. Envolver em $transaction.
+
+19. 401 generico no frontend
+    Admin-panel e starter-web mostram "Email ou senha invalidos" pra
+    QUALQUER 401 do /auth/login. Esconde mensagens como "Licenca da
+    empresa expirada". Corrigir lendo o `message` do body.
+
+20. Redis sem senha - RESOLVIDO
+    requirepass configurado. REDIS_PASSWORD nos .env.
+
+21. CORS hardcoded - RESOLVIDO
+    Agora le de CORS_ORIGINS no .env.
+
+22. STARTER_IT_URL typo - RESOLVIDO
+    Corrigido pra STARTER_KIT_URL.
+
+23. register usa tenantId_email composto - RESOLVIDO
+    Agora checa email global. Schema tem @@unique([email]).
+
+24. emailVerified nao e checado em lugar nenhum
+    Campo populado em setPassword + OAuth, mas nenhum login valida.
+    Decisao: implementar na fase de testes (bloquear login de user
+    nao verificado).
+
+25. Contextos desatualizados
+    Este arquivo + CONTEXTO-COMUM + CONTEXTO-STARTER-KIT + SISTEMA-DE-TEMAS
+    precisam ser mantidos atualizados.
+
 =========================================================================
 PROXIMAS TAREFAS DO PORTEIRO
 =========================================================================
 
 1. Aplicar rate limit nos outros controllers
-2. Tela de Permissions (somente leitura, agrupada em 2 niveis)
-3. Fluxo de OAuth (Google/GitHub) - usa tabela Account
-4. UI de sessoes do proprio usuario (hoje so admin ve)
-5. Logout de todas as sessoes pelo proprio usuario
-6. Multi-aba (BroadcastChannel)
-7. Revisao de seguranca (2FA, auditoria de login)
+2. Aplicar @HttpCode(200) nos outros controllers (status HTTP correto)
+3. Resolver start-all.sh (polling + observability)
+4. Multi-aba com RTR (BroadcastChannel)
+5. Cleanup de sessoes (via @nestjs/schedule)
+6. Menu de configuracoes
+7. Revisao de seguranca (2FA, politica de senha, auditoria de login)
 8. Documentacao de API (Swagger mais completo)
 9. Testes automatizados
-10. Menu de configuracoes
-11. Cleanup de sessoes (via @nestjs/schedule)
+10. Refactor: monorepo com npm workspaces (codigo duplicado)
 
 =========================================================================
 COMO O PORTEIRO SE RELACIONA COM O STARTER-KIT
@@ -403,9 +516,8 @@ O starter-kit e um CLIENTE do Porteiro.
   - O starter-kit NAO tem User/Role/Permission/Tenant/Session no
     sentido de "serem a fonte de verdade". Eles vivem no Porteiro.
   - O starter-kit tem copia dos modulos IAM no schema (por decisao
-    de facilitar o setup), mas o PermissionsResolverService do
-    starter-kit NAO consulta o banco local - consulta o Redis do
-    Porteiro + API do Porteiro.
+    de facilitar o setup), mas o JwtAuthGuard do starter NAO consulta
+    banco local. Ele confia no payload do JWT.
   - Os dois compartilham JWT_SECRET e Redis.
 
 Para detalhes do starter, ver CONTEXTO-STARTER-KIT.md.

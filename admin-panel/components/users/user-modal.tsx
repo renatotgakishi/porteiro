@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Role } from "@/lib/api/roles";
 import type { User } from "@/lib/api/users";
+import { Card } from "@/components/ui/card";
 
 type Mode = "create" | "edit";
 
@@ -101,8 +102,8 @@ export function UserModal({
       className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50"
       onClick={onClose}
     >
-      <div
-        className="bg-card rounded-2xl p-6 w-full max-w-lg border border-border shadow-xl"
+      <Card
+        className="p-6 w-full max-w-lg shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="font-semibold text-sm text-foreground">
@@ -148,9 +149,7 @@ export function UserModal({
           )}
 
           <div>
-            <label className="text-xs text-muted-foreground">
-              Cargos
-            </label>
+            <label className="text-xs text-muted-foreground">Cargos</label>
             {roles.length === 0 ? (
               <p className="text-xs text-muted-foreground mt-1">
                 Nenhum cargo disponível neste tenant.
@@ -164,11 +163,10 @@ export function UserModal({
                       key={r.id}
                       type="button"
                       onClick={() => toggleRole(r.id)}
-                      className={`px-3 py-1.5 rounded-full border text-xs transition ${
-                        selected
+                      className={`px-3 py-1.5 rounded-full border text-xs transition ${selected
                           ? "bg-stone-900 text-white dark:bg-white dark:text-black border-stone-900 dark:border-white"
                           : "bg-background border-border hover:bg-muted"
-                      }`}
+                        }`}
                     >
                       {r.name}
                     </button>
@@ -178,9 +176,7 @@ export function UserModal({
             )}
           </div>
 
-          {error && (
-            <p className="text-xs text-red-500">{error}</p>
-          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
         </div>
 
         <div className="flex justify-end gap-2 mt-6">
@@ -199,7 +195,7 @@ export function UserModal({
             {saving ? "Salvando..." : "Salvar"}
           </button>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

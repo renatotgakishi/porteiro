@@ -6,6 +6,7 @@ import { Loader2, ShieldOff } from "lucide-react";
 import type { User } from "@/lib/api/users";
 import { useUserSessions } from "@/hooks/use-user-sessions";
 import { useConfirm } from "@/lib/confirm-context";
+import { Card } from "@/components/ui/card";
 import { SessionChainItem } from "./session-chain";
 
 type Props = {
@@ -63,8 +64,8 @@ export function SessionsModal({ open, user, onClose }: Props) {
       className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50"
       onClick={onClose}
     >
-      <div
-        className="bg-card rounded-2xl w-full max-w-2xl border border-border shadow-xl flex flex-col max-h-[85vh]"
+      <Card
+        className="w-full max-w-2xl shadow-xl flex flex-col max-h-[85vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -127,10 +128,7 @@ export function SessionsModal({ open, user, onClose }: Props) {
 
           {!loading && visibleChains.length === 0 && (
             <div className="flex flex-col items-center justify-center py-10 text-center">
-              <ShieldOff
-                size={28}
-                className="text-muted-foreground/50 mb-2"
-              />
+              <ShieldOff size={28} className="text-muted-foreground/50 mb-2" />
               <p className="text-sm text-muted-foreground">
                 {showRevoked
                   ? "Nenhuma sessão encontrada"
@@ -154,7 +152,7 @@ export function SessionsModal({ open, user, onClose }: Props) {
               />
             ))}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

@@ -4,6 +4,7 @@ Padrao visual dos frontends do Porteiro e do Starter-kit.
 Usado pra manter consistencia entre as telas e entre os projetos.
 
 Quando for mexer em UI, cole este arquivo junto com CONTEXTO-COMUM.md.
+Se for mexer em tema, cole tambem SISTEMA-DE-TEMAS.md.
 
 =========================================================================
 FILOSOFIA VISUAL
@@ -28,6 +29,11 @@ PALETA DE CORES
 As cores sao definidas como CSS variables em app/globals.css e
 consumidas via Tailwind (classes tipo bg-background, text-foreground).
 
+ATENCAO: as cores abaixo sao apenas o DEFAULT do globals.css.
+Cada tenant pode ter um TEMA PROPRIO que sobrescreve esses valores
+em tempo de execucao. Ver secao "SISTEMA DE TEMAS" no final deste
+arquivo e o SISTEMA-DE-TEMAS.md para detalhes completos.
+
 Variaveis (tema claro):
   --bg:                30 20% 97.5%   (bege claro quente)
   --bg-card:           0 0% 100%       (branco puro)
@@ -47,6 +53,17 @@ Variaveis (tema escuro - classe .dark):
   --text-muted:        30 5% 55%       (cinza medio)
   --primary:           0 0% 98%        (branco - botao primario no dark)
   --primary-foreground: 30 10% 15%     (preto - texto em botao primario)
+
+Outras variaveis (usadas por temas com estilos especificos):
+  --bg-image:          none | linear-gradient(...) | url(...)
+  --glass-opacity:     0.68 (claro) / 0.38 (escuro)
+  --glass-blur:        24px
+  --glass-saturate:    180%
+  --neumorph-intensity: 8px
+  --neumorph-blur:     16px
+  --radius-card:       16px
+  --radius-button:     12px
+  --radius-input:      12px
 
 CORES DE ESTADO (fixas, nao dependem do tema):
   - Sucesso:  emerald-600 (texto) / emerald-100 (bg claro) / emerald-950/40 (bg dark)
@@ -254,6 +271,11 @@ Modais reutilizaveis:
   <ConfirmDialog>  -> confirmacao (via useConfirm())
   <CrudModal>      -> modal generico de CRUD
 
+IMPORTANTE - data-glass-card:
+  O container interno do modal deve ter data-glass-card para que
+  o estilo glass/neumorphism seja aplicado corretamente.
+  Ver secao "SISTEMA DE TEMAS" no final.
+
 =========================================================================
 SIDEBAR
 =========================================================================
@@ -281,6 +303,10 @@ Submenu (accordion):
   - ChevronDown que rotaciona quando aberto
   - space-y-1 entre itens
 
+IMPORTANTE - Sidebar NAO tem data-glass-card:
+  A sidebar e sempre solida, independente do estilo do tema.
+  O globals.css ja tem regra especifica pra ela.
+
 =========================================================================
 TOPBAR
 =========================================================================
@@ -300,12 +326,16 @@ Breadcrumb:
   - Ultimo item: bg-primary text-primary-foreground px-3 py-1
                  rounded-full text-xs font-medium
 
+IMPORTANTE - Topbar NAO tem data-glass-card:
+  Sempre solida, independente do estilo do tema.
+
 =========================================================================
 TABELAS
 =========================================================================
 
 Container:
   bg-card border border-border rounded-2xl overflow-hidden
+  (adicionar data-glass-card se a tabela for o conteudo principal)
 
 Header:
   thead.bg-muted/50
@@ -353,6 +383,7 @@ Usado em Tenants (cartao) em vez de tabela.
 
 Estrutura:
   p-4 rounded-xl border border-border bg-card
+  (adicionar data-glass-card se for o card principal da pagina)
 
 Conteudo:
   - Header: avatar + nome + subtitulo (slug)
@@ -481,6 +512,61 @@ ACESSIBILIDADE
   - Clique fora fecha modais
 
 =========================================================================
+SISTEMA DE TEMAS
+=========================================================================
+
+As cores listadas em "PALETA DE CORES" sao apenas o DEFAULT do
+globals.css. Cada tenant pode ter um TEMA PROPRIO que sobrescreve
+essas variaveis em tempo de execucao.
+
+Como funciona:
+  - O tema do tenant vem do /auth/me (campo tenant.theme).
+  - applyThemeToDocument() seta as CSS variables no <html>.
+  - As classes Tailwind (bg-card, text-foreground, etc.) continuam
+    as mesmas, mas agora consomem os valores do tema.
+
+IMPLICACAO PRA UI:
+  - NUNCA assumir que bg-card e branco puro. Pode ser qualquer cor
+    que o tema definir.
+  - NUNCA usar a cor "bege" ou "branco" hardcoded.
+  - SEMPRE usar bg-card / bg-background / text-foreground / border-border.
+  - Se voce precisar de uma cor especifica que nao existe como
+    variavel, PERGUNTE antes de adicionar hardcoded.
+
+ESTILOS (flat | glass | neumorphism):
+  Alem das cores, o tema define um ESTILO. O atributo
+  data-theme-style no <html> controla isso.
+  - flat: visual padrao (sem efeitos)
+  - glass: efeito vidro (backdrop-filter blur + transparencia)
+  - neumorphism: efeito de relevo (sombras internas/externas)
+
+  O CSS em globals.css tem regras tipo:
+    html[data-theme-style="glass"] [data-glass-card] { ... }
+    html[data-theme-style="neumorphism"] [data-glass-card] { ... }
+
+  Marcacao de elementos que reagem ao estilo:
+    data-glass-card  -> cards que mudam de aparencia em glass/neumorph
+
+  ONDE ADICIONAR data-glass-card:
+    - Cards principais (containers de lista, paineis)
+    - Modais (o container interno)
+    - Containers de destaque
+
+  ONDE NAO ADICIONAR:
+    - Sidebar (sempre solida, ja tem regra propria)
+    - Topbar (idem)
+    - Inputs e botoes (tem estilo proprio)
+
+  IMPORTANTE: sem data-glass-card, o estilo glass/neumorph nao
+  aparece no elemento. O card fica solido mesmo em tema glass.
+
+  Ver exemplos nos cards de papeis (roles) e permissoes:
+  eles tem data-glass-card e ficam com efeito neumorph no print.
+
+Para detalhes completos do subsistema (schema, endpoints, fluxo),
+ver SISTEMA-DE-TEMAS.md.
+
+=========================================================================
 QUANDO CRIAR UMA TELA NOVA
 =========================================================================
 
@@ -495,7 +581,13 @@ QUANDO CRIAR UMA TELA NOVA
    - <Combobox> pra select com busca
    - <PasswordInput> pra campos de senha
 5. Testar em tema claro E escuro
+5.1. Se a tela tiver cards/modais principais, adicionar
+     data-glass-card pra que o estilo glass/neumorph funcione
+5.2. Se a tela tiver modais, adicionar data-glass-card no container
+     interno do modal
 6. Testar em tela pequena (responsivo)
+7. Se o projeto tiver tema do tenant (starter-web, admin-panel),
+   testar com pelo menos 2 temas diferentes
 
 =========================================================================
 CHECKLIST ANTES DE COMMITAR UI
@@ -504,6 +596,7 @@ CHECKLIST ANTES DE COMMITAR UI
   [ ] Nao usei cores hardcoded (bg-white, text-stone-500, etc)
   [ ] Usei bg-card / bg-background / text-foreground / border-border
   [ ] Testei em tema claro E escuro
+  [ ] Cards/modais principais tem data-glass-card
   [ ] Icones tem title + aria-label (se so icone)
   [ ] Modais fecham com ESC e clique fora
   [ ] Botoes tem disabled quando estao carregando
@@ -511,6 +604,7 @@ CHECKLIST ANTES DE COMMITAR UI
   [ ] Empty state quando lista vazia
   [ ] Loading state enquanto carrega
   [ ] Responsivo (se aplicavel)
+  [ ] Se mexeu em tema, testou com 2+ temas diferentes
 
 =========================================================================
 REFERENCIA DE COMPONENTES EXISTENTES
@@ -525,3 +619,5 @@ Para copiar padrao, ver:
   - Menu de usuario: layout/user-menu.tsx
   - Combobox: shared/combobox.tsx
   - ConfirmDialog: shared/confirm-dialog.tsx
+  - Cards com data-glass-card (exemplo): app/(dashboard)/roles/page.tsx
+    (os cards de papeis e permissoes tem o atributo)
